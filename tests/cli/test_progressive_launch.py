@@ -149,7 +149,8 @@ def test_browser_warning_retains_owning_instance_after_server_exit(
     monkeypatch, browser_workers, caplog, automatic, raises
 ):
     supervisor = commands.ServerSupervisor(console_logging=False)
-    settings = Settings()
+    # Loopback keeps the exposure warning out of the browser-warning log count.
+    settings = Settings(host="127.0.0.1")
     entered, release = threading.Event(), threading.Event()
     instances = []
 
@@ -525,3 +526,33 @@ def test_external_probe_is_cancelled_before_any_request(monkeypatch):
     monkeypatch.setattr(commands, "open_local_request", request)
     assert not commands.open_admin_when_ready(Settings(), stop_event=stop)
     request.assert_not_called()
+
+
+def test_exposed_listener_logs_the_network_warning(monkeypatch, caplog):
+    supervisor = commands.ServerSupervisor(console_logging=False)
+    settings = Settings(host="0.0.0.0")
+
+    monkeypatch.setattr(
+        "free_claude_code.runtime.bootstrap.build_asgi_app",
+        lambda *args, **kwargs: SimpleNamespace(
+            runtime=SimpleNamespace(
+                instance_id="instance-0",
+                is_closed=True,
+                http_started=lambda: None,
+                begin_shutdown=lambda: None,
+                close=AsyncMock(return_value=True),
+            )
+        ),
+    )
+    monkeypatch.setattr(uvicorn, "Config", lambda *args, **kwargs: None)
+
+    class Server:
+        def __init__(self, config, **kwargs):
+            pass
+
+        def run(self, **kwargs):
+            pass
+
+    monkeypatch.setattr("free_claude_code.cli.uvicorn_server.RuntimeServer", Server)
+    supervisor._run_bound(settings, [], open_admin_browser=False, restart_generation=0)
+    assert any("authentication is disabled" in r.getMessage() for r in caplog.records)

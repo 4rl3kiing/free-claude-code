@@ -375,6 +375,17 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         session_sensitive=True,
     ),
     ConfigFieldSpec(
+        "WHISPER_LANGUAGE",
+        "Whisper Language",
+        "voice",
+        settings_attr="whisper_language",
+        session_sensitive=True,
+        description=(
+            "Spoken language for local Whisper: a code such as en or es, "
+            "or auto to detect it."
+        ),
+    ),
+    ConfigFieldSpec(
         "ENABLE_WEB_SERVER_TOOLS",
         "Web Server Tools",
         "web_tools",

@@ -58,6 +58,7 @@ RUNTIME_FIELDS = (
     "voice_note_enabled",
     "whisper_device",
     "whisper_model",
+    "whisper_language",
     "messaging_platform",
     "messaging_rate_limit",
     "messaging_rate_window",

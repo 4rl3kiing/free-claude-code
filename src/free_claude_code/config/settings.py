@@ -704,6 +704,11 @@ class Settings(BaseModel):
     whisper_model: NonEmptyString = Field(
         default="base", validation_alias="WHISPER_MODEL"
     )
+    # Spoken language for local Whisper: an ISO 639-1 code such as "en" or "es",
+    # or "auto" to let Whisper detect it. NVIDIA NIM models fix their own language.
+    whisper_language: NonEmptyString = Field(
+        default="en", validation_alias="WHISPER_LANGUAGE"
+    )
     # ==================== Bot Wrapper Config ====================
     telegram_bot_token: OptionalNonEmptyString = Field(
         default=None,

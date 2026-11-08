@@ -260,3 +260,20 @@ async def test_transcription_service_reports_missing_local_extra(
         pytest.raises(ImportError, match="voice_local extra"),
     ):
         await service.transcribe(audio_path)
+
+
+@pytest.mark.parametrize(
+    ("language", "expected"),
+    [
+        ("en", {"task": "transcribe", "language": "en"}),
+        ("ES", {"task": "transcribe", "language": "es"}),
+        (" auto ", {"task": "transcribe"}),
+    ],
+)
+def test_whisper_language_is_configurable(language: str, expected: dict) -> None:
+    service = TranscriptionService(model="base", device="cpu", language=language)
+    assert service._generate_kwargs() == expected
+
+
+def test_whisper_language_defaults_to_the_previous_english_behavior() -> None:
+    assert _service()._generate_kwargs() == {"task": "transcribe", "language": "en"}
