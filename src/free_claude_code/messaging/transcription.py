@@ -26,6 +26,7 @@ class TranscriptionService:
         *,
         model: str,
         device: str,
+        language: str = "en",
         huggingface_api_key: str | None = None,
     ) -> None:
         if device not in {"cpu", "cuda"}:
@@ -34,6 +35,7 @@ class TranscriptionService:
             )
         self._model_id = _MODEL_MAP.get(model, model)
         self._device = device
+        self._language = language.strip().lower()
         self._huggingface_api_key = huggingface_api_key
         self._pipeline: Any | None = None
         self._lock = asyncio.Lock()
@@ -63,13 +65,20 @@ class TranscriptionService:
     def _transcribe_sync(self, file_path: Path) -> str:
         pipe = self._get_pipeline()
         audio = _load_audio(file_path)
-        result = pipe(audio, generate_kwargs={"language": "en", "task": "transcribe"})
+        result = pipe(audio, generate_kwargs=self._generate_kwargs())
         text = result.get("text", "") or ""
         if isinstance(text, list):
             text = " ".join(text) if text else ""
         result_text = text.strip()
         logger.debug("Local transcription: {} chars", len(result_text))
         return result_text or "(no speech detected)"
+
+    def _generate_kwargs(self) -> dict[str, str]:
+        """Pin the language unless it is "auto", which lets Whisper detect it."""
+        kwargs = {"task": "transcribe"}
+        if self._language != "auto":
+            kwargs["language"] = self._language
+        return kwargs
 
     def _get_pipeline(self) -> Any:
         if self._pipeline is not None:

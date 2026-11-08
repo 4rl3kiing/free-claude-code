@@ -22,7 +22,11 @@ from free_claude_code.config.loader import (
     get_settings,
 )
 from free_claude_code.config.paths import managed_env_path, server_owner_lock_path
-from free_claude_code.config.server_urls import local_admin_url, local_proxy_root_url
+from free_claude_code.config.server_urls import (
+    local_admin_url,
+    local_proxy_root_url,
+    network_exposure_warnings,
+)
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.interprocess_lock import InterprocessFileLock
 
@@ -329,6 +333,8 @@ class ServerSupervisor:
             settings,
             restart_callback=self._request_runtime_restart,
         )
+        for warning in network_exposure_warnings(settings):
+            logger.warning(warning)
         config = uvicorn.Config(
             asgi_app,
             host=settings.host,

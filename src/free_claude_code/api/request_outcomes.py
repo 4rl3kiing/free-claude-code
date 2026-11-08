@@ -10,6 +10,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from free_claude_code.core.anthropic.stream_contracts import SSEEvent
 from free_claude_code.core.anthropic.streaming.decoder import AnthropicSSEDecoder
+from free_claude_code.core.metrics import REQUEST_METRICS
 from free_claude_code.core.request_outcomes import (
     RequestOutcome,
     current_request_outcome,
@@ -122,6 +123,14 @@ class RequestOutcomeMiddleware:
                 result, reason = "failure", "incomplete_response"
             else:
                 result = "success"
+            duration_seconds = monotonic() - started
+            REQUEST_METRICS.record(
+                provider_id=outcome.provider_id,
+                model=outcome.model,
+                wire_api=generation_api(scope["path"]),
+                outcome=result,
+                duration_seconds=duration_seconds,
+            )
             logger.bind(
                 event="request.completed",
                 wire_api=generation_api(scope["path"]),
@@ -129,6 +138,6 @@ class RequestOutcomeMiddleware:
                 model=outcome.model,
                 status_code=status_code,
                 outcome=result,
-                duration_ms=round((monotonic() - started) * 1000, 2),
+                duration_ms=round(duration_seconds * 1000, 2),
                 failure_reason=reason,
             ).info("Inference request {}", result)

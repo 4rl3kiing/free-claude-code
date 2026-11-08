@@ -27,6 +27,7 @@ from free_claude_code.core.anthropic.native import (
 from free_claude_code.core.anthropic.passthrough import NativeMessagesRequest
 from free_claude_code.core.gemini import GeminiRequest
 from free_claude_code.core.json_types import JsonObject
+from free_claude_code.core.metrics import REQUEST_METRICS
 from free_claude_code.core.openai_responses import OpenAIResponsesRequest
 from free_claude_code.core.trace import trace_event
 
@@ -358,6 +359,21 @@ async def probe_root():
 @router.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+@router.get("/metrics")
+async def metrics(_auth=Depends(require_proxy_auth)) -> Response:
+    """Prometheus text exposition of finished inference requests."""
+    return Response(
+        content=REQUEST_METRICS.render(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.api_route("/metrics", methods=["HEAD", "OPTIONS"])
+async def probe_metrics(_auth=Depends(require_proxy_auth)):
+    return _probe_response("GET, HEAD, OPTIONS")
 
 
 @router.api_route("/health", methods=["HEAD", "OPTIONS"])

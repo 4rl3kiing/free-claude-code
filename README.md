@@ -482,7 +482,15 @@ Local Whisper with CUDA 13.0:
 
 After installing local support, restart `fcc-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu` or `cuda`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`.
 
+Local Whisper transcribes English by default. Set **Whisper Language** (`WHISPER_LANGUAGE`) to another code such as `es`, or to `auto` to let Whisper detect the language.
+
 </details>
+
+## Monitoring And Network Safety
+
+`GET /metrics` returns Prometheus text with `fcc_requests_total` and `fcc_request_duration_seconds`, labeled by provider, model, API, and outcome (`success`, `failure`, or `cancelled`). It uses the same authentication as the other API routes, so send the proxy token as a bearer token when **Require API Authentication** is on. Counters are kept in memory and reset when FCC restarts.
+
+FCC listens on all interfaces by default. At startup it logs a warning when it is reachable from the network without authentication, or with the default API token. Enable **Require API Authentication** in Admin, set a unique token, or set `HOST=127.0.0.1` to keep it local.
 
 ## Manage Your Installation
 
