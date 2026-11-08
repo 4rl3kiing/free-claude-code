@@ -156,6 +156,7 @@ async def _create_transcriber(settings: Settings) -> Transcriber | None:
             TranscriptionService,
             model=settings.whisper_model,
             device=settings.whisper_device,
+            language=settings.whisper_language,
             huggingface_api_key=first_api_key(settings.huggingface_api_keys),
         )
 

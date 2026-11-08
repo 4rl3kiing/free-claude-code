@@ -53,3 +53,30 @@ def proxy_v1_url(proxy_root_url: str) -> str:
 
     stripped = proxy_root_url.rstrip("/")
     return stripped if stripped.endswith("/v1") else f"{stripped}/v1"
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "[::1]", "localhost"})
+DEFAULT_PROXY_AUTH_TOKEN = "freecc"
+
+
+def network_exposure_warnings(settings: Settings) -> tuple[str, ...]:
+    """Explain risky listener settings; empty when the server is loopback-only."""
+
+    host = (settings.host or "").strip().lower()
+    if host in _LOOPBACK_HOSTS:
+        return ()
+    listener = f"{settings.host}:{settings.port}"
+    if not settings.proxy_auth_enabled:
+        return (
+            f"FCC is listening on {listener}, which other machines on the network "
+            "can reach, and API authentication is disabled. Anyone who can connect "
+            "can spend your provider keys. Enable Require API Authentication in "
+            "Admin or set HOST=127.0.0.1.",
+        )
+    if settings.proxy_auth_token == DEFAULT_PROXY_AUTH_TOKEN:
+        return (
+            f"FCC is listening on {listener} with the default API token "
+            f"'{DEFAULT_PROXY_AUTH_TOKEN}'. Set a unique API/CLI Auth Token in "
+            "Admin or set HOST=127.0.0.1.",
+        )
+    return ()
