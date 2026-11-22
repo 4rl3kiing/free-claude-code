@@ -7,7 +7,13 @@ from free_claude_code.core.metrics import (
 )
 
 
-def _record(metrics, model="m", outcome="success", seconds=1.0, provider="p"):
+def _record(
+    metrics: RequestMetrics,
+    model: str = "m",
+    outcome: str = "success",
+    seconds: float = 1.0,
+    provider: str = "p",
+) -> None:
     metrics.record(
         provider_id=provider,
         model=model,

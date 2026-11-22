@@ -596,13 +596,14 @@ def test_external_probe_is_cancelled_before_any_request(
     request.assert_not_called()
 
 
-def test_exposed_listener_logs_the_network_warning(monkeypatch, caplog):
+def test_exposed_listener_logs_the_network_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     supervisor = commands.ServerSupervisor(console_logging=False)
     settings = Settings(host="0.0.0.0")
 
-    monkeypatch.setattr(
-        "free_claude_code.runtime.bootstrap.build_asgi_app",
-        lambda *args, **kwargs: SimpleNamespace(
+    def fake_build_asgi_app(*args: object, **kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
             runtime=SimpleNamespace(
                 instance_id="instance-0",
                 is_closed=True,
@@ -610,15 +611,22 @@ def test_exposed_listener_logs_the_network_warning(monkeypatch, caplog):
                 begin_shutdown=lambda: None,
                 close=AsyncMock(return_value=True),
             )
-        ),
+        )
+
+    monkeypatch.setattr(
+        "free_claude_code.runtime.bootstrap.build_asgi_app", fake_build_asgi_app
     )
-    monkeypatch.setattr(uvicorn, "Config", lambda *args, **kwargs: None)
+
+    def fake_config(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(uvicorn, "Config", fake_config)
 
     class Server:
-        def __init__(self, config, **kwargs):
+        def __init__(self, config: object, **kwargs: object) -> None:
             pass
 
-        def run(self, **kwargs):
+        def run(self, **kwargs: object) -> None:
             pass
 
     monkeypatch.setattr("free_claude_code.cli.uvicorn_server.RuntimeServer", Server)

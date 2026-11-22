@@ -7,7 +7,7 @@ from free_claude_code.config.settings import Settings
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1", "[::1]"])
-def test_loopback_hosts_never_warn(host):
+def test_loopback_hosts_never_warn(host: str) -> None:
     assert network_exposure_warnings(Settings(host=host)) == ()
 
 

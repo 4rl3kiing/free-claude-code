@@ -292,7 +292,9 @@ async def test_transcription_service_reports_missing_local_extra(
         (" auto ", {"task": "transcribe"}),
     ],
 )
-def test_whisper_language_is_configurable(language: str, expected: dict) -> None:
+def test_whisper_language_is_configurable(
+    language: str, expected: dict[str, str]
+) -> None:
     service = TranscriptionService(model="base", device="cpu", language=language)
     assert service._generate_kwargs() == expected
 

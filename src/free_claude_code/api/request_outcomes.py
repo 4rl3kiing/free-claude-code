@@ -129,7 +129,7 @@ class RequestOutcomeMiddleware:
             REQUEST_METRICS.record(
                 provider_id=outcome.provider_id,
                 model=outcome.model,
-                wire_api=generation_api(scope["path"]),
+                wire_api=generation_api(path),
                 outcome=result,
                 duration_seconds=duration_seconds,
             )

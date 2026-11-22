@@ -1,6 +1,7 @@
 """The /metrics route follows proxy authentication and reflects finished requests."""
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from free_claude_code.api.dependencies import get_settings
@@ -17,11 +18,11 @@ def clean_metrics():
 
 
 @pytest.fixture
-def app():
+def app() -> FastAPI:
     return create_test_app(Settings())
 
 
-def test_metrics_exposes_prometheus_text(app):
+def test_metrics_exposes_prometheus_text(app: FastAPI) -> None:
     REQUEST_METRICS.record(
         provider_id="nvidia_nim",
         model="m",
@@ -36,7 +37,7 @@ def test_metrics_exposes_prometheus_text(app):
     assert 'fcc_requests_total{provider="nvidia_nim"' in response.text
 
 
-def test_metrics_requires_proxy_token_when_auth_is_enabled(app):
+def test_metrics_requires_proxy_token_when_auth_is_enabled(app: FastAPI) -> None:
     client = TestClient(app)
     settings = Settings(proxy_auth_enabled=True, proxy_auth_token="s3cr3t")
     app.dependency_overrides[get_settings] = lambda: settings
@@ -60,17 +61,18 @@ def test_metrics_requires_proxy_token_when_auth_is_enabled(app):
 
 def test_outcome_middleware_records_one_series_per_finished_request():
     from starlette.applications import Starlette
+    from starlette.requests import Request
     from starlette.responses import JSONResponse
     from starlette.routing import Route
 
     from free_claude_code.api.request_outcomes import RequestOutcomeMiddleware
     from free_claude_code.core.request_outcomes import record_request_route
 
-    async def messages(request):
+    async def messages(request: Request) -> JSONResponse:
         record_request_route("groq", "llama")
         return JSONResponse({"ok": True})
 
-    async def health(request):
+    async def health(request: Request) -> JSONResponse:
         return JSONResponse({"ok": True})
 
     app = Starlette(
