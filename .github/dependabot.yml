@@ -7,6 +7,9 @@ updates:
       prefix: "patch"
     schedule:
       interval: "daily"
+    # Let new releases age a week before proposing them (supply-chain safety).
+    cooldown:
+      default-days: 7
     groups:
       dependencies:
         patterns: ["*"]
@@ -14,3 +17,6 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    # Let new releases age a week before proposing them (supply-chain safety).
+    cooldown:
+      default-days: 7
