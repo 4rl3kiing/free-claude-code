@@ -1,6 +1,7 @@
 from typing import override
 from unittest.mock import MagicMock, patch
 
+import httpx2
 import pytest
 from fastapi.applications import FastAPI
 from fastapi.testclient import TestClient
@@ -107,7 +108,7 @@ async def _mock_empty_stream(*args: MessagesRequest, **kwargs: object):
         yield StreamOutput(("unreachable",))
 
 
-def _invalid_request_error(response: Response):
+def _invalid_request_error(response: Response | httpx2.Response):
     assert response.status_code == 400
     payload = response_object(response)
     assert payload["type"] == "error"
@@ -116,7 +117,7 @@ def _invalid_request_error(response: Response):
     return payload["error"]
 
 
-def _terminal_json_error(response: Response, *, status_code: int):
+def _terminal_json_error(response: Response | httpx2.Response, *, status_code: int):
     assert response.status_code == status_code
     assert response.headers["content-type"].startswith("application/json")
     assert response.headers["x-should-retry"] == "false"

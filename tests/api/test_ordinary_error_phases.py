@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
@@ -93,7 +94,7 @@ def test_conversion_error_returns_http_400_without_generation(mode: str) -> None
 
 
 def _assert_ordinary_protocol_error(
-    response: httpx.Response,
+    response: httpx.Response | httpx2.Response,
     *,
     wire_api: str,
     status_code: int,

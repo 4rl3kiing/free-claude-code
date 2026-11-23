@@ -271,7 +271,9 @@ def ingress_request(
     return "/v1/chat/completions" if wire == "chat" else f"/v1/{wire}", body
 
 
-def response_value(response: httpx.Response, wire: str, streaming: bool):
+def response_value(
+    response: httpx.Response | httpx2.Response, wire: str, streaming: bool
+):
     assert response.status_code == 200, response.text
     if not streaming:
         return response_payload(response)

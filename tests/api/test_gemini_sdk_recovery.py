@@ -6,6 +6,7 @@ import warnings
 from copy import deepcopy
 
 import httpx
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
@@ -27,6 +28,22 @@ with warnings.catch_warnings():
     )
     from google import genai
     from google.genai import types
+
+
+_HOP_BY_HOP = frozenset({"content-encoding", "content-length", "transfer-encoding"})
+
+
+def _as_httpx_response(response: httpx2.Response) -> httpx.Response:
+    """Hand the Starlette 1.x test client's httpx2 reply to the SDK's httpx client."""
+    return httpx.Response(
+        response.status_code,
+        headers=[
+            (name, value)
+            for name, value in response.headers.multi_items()
+            if name.lower() not in _HOP_BY_HOP
+        ],
+        content=response.content,
+    )
 
 
 @pytest.mark.parametrize("streaming", [False, True])
@@ -157,11 +174,13 @@ def test_sdk_recovers_and_replays_native_generation(
     with TestClient(app) as fcc:
 
         def bridge(request: httpx.Request):
-            return fcc.request(
-                request.method,
-                str(request.url),
-                content=request.content,
-                headers=request.headers,
+            return _as_httpx_response(
+                fcc.request(
+                    request.method,
+                    str(request.url),
+                    content=request.content,
+                    headers=request.headers,
+                )
             )
 
         with genai.Client(
@@ -335,11 +354,13 @@ async def test_sdk_chat_automatic_tool_result_preserves_recovered_history(
     with TestClient(app) as fcc:
 
         def bridge(request: httpx.Request):
-            return fcc.request(
-                request.method,
-                str(request.url),
-                content=request.content,
-                headers=request.headers,
+            return _as_httpx_response(
+                fcc.request(
+                    request.method,
+                    str(request.url),
+                    content=request.content,
+                    headers=request.headers,
+                )
             )
 
         async def async_bridge(request: httpx.Request):
