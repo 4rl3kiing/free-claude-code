@@ -297,10 +297,11 @@ jobs:
         run: uv run --locked python -m scripts.ci_timings start
 
       - name: Run pytest
-        shell: bash
+        env:
+          # pytest-split reads the shard from env: no template expansion in run.
+          PYTEST_ADDOPTS: --splits ${{ matrix.shards }} --group ${{ matrix.shard }}
         run: >-
           uv run --locked pytest -c pyproject.toml -v --tb=short -o thread_dump_timeout=15 --durations=50
-          --splits "$CI_TIMINGS_SHARDS" --group "$CI_TIMINGS_SHARD"
           --splitting-algorithm=least_duration
           --store-durations --clean-durations
           --durations-path "${{ runner.temp }}/fcc-ci-timings/working/durations.json"
@@ -432,13 +433,14 @@ jobs:
         run: uv run --locked python -m scripts.ci_timings start
 
       - name: Run Playwright
-        shell: bash
+        env:
+          # pytest-split reads the shard from env: no template expansion in run.
+          PYTEST_ADDOPTS: --splits ${{ matrix.shards }} --group ${{ matrix.shard }}
         run: >-
           uv run --locked pytest e2e -c pyproject.toml -v --tb=short
           -o thread_dump_timeout=10 --durations=20
           --tracing=retain-on-failure --screenshot=only-on-failure
           --full-page-screenshot --output=test-results
-          --splits "$CI_TIMINGS_SHARDS" --group "$CI_TIMINGS_SHARD"
           --splitting-algorithm=least_duration
           --store-durations --clean-durations
           --durations-path "${{ runner.temp }}/fcc-ci-timings/working/durations.json"
