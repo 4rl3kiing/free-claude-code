@@ -122,11 +122,16 @@ def _shard_counts(workflow: Workflow, suite: str) -> dict[str, int]:
 def _assert_required_test_matrix(
     workflow: Workflow, suite: str, entries: list[dict[str, str | int]]
 ) -> None:
-    job = workflow["jobs"][f"{suite}-shards"]
-    assert job["runs-on"] == "${{ matrix.runner }}"
-    assert job["strategy"]["matrix"] == (
-        "${{ fromJSON(needs.prepare-shards.outputs." + suite + "_matrix) }}"
-    )
+    # Linux shards gate the Windows and macOS shards; together they run all.
+    for job_name, output in (
+        (f"{suite}-shards", f"{suite}_linux_matrix"),
+        (f"{suite}-shards-other", f"{suite}_other_matrix"),
+    ):
+        job = workflow["jobs"][job_name]
+        assert job["runs-on"] == "${{ matrix.runner }}"
+        assert job["strategy"]["matrix"] == (
+            "${{ fromJSON(needs.prepare-shards.outputs." + output + ") }}"
+        )
     assert len(entries) == sum(_shard_counts(workflow, suite).values())
     assert {(entry["os"], entry["runner"]) for entry in entries} == set(
         REQUIRED_TEST_RUNNERS.items()
