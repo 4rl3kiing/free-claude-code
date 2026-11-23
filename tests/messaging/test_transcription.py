@@ -3,6 +3,8 @@
 import asyncio
 import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -20,11 +22,30 @@ def _service(*, api_key: str = "") -> TranscriptionService:
     )
 
 
+@dataclass
+class _Cuda:
+    is_available: Callable[[], bool]
+
+
+@dataclass
+class _Torch:
+    cuda: _Cuda
+    float16: object
+    float32: object
+
+
+@dataclass
+class _Transformers:
+    AutoModelForSpeechSeq2Seq: MagicMock
+    AutoProcessor: MagicMock
+    pipeline: MagicMock
+
+
 def _fake_optional_modules(
     pipeline: MagicMock,
-) -> tuple[SimpleNamespace, SimpleNamespace, MagicMock, MagicMock]:
-    torch = SimpleNamespace(
-        cuda=SimpleNamespace(is_available=lambda: False),
+) -> tuple[_Torch, _Transformers, MagicMock, MagicMock]:
+    torch = _Torch(
+        cuda=_Cuda(is_available=lambda: False),
         float16=object(),
         float32=object(),
     )
@@ -37,7 +58,7 @@ def _fake_optional_modules(
     processor_loader = MagicMock()
     processor_loader.from_pretrained.return_value = processor
 
-    transformers = SimpleNamespace(
+    transformers = _Transformers(
         AutoModelForSpeechSeq2Seq=model_loader,
         AutoProcessor=processor_loader,
         pipeline=MagicMock(return_value=pipeline),
@@ -77,6 +98,7 @@ async def test_transcription_service_transcribes_and_reuses_its_pipeline(
     assert pipeline.call_count == 2
     model_loader.from_pretrained.assert_called_once_with(
         "openai/whisper-base",
+        revision="e37978b90ca9030d5170a5c07aadb050351a65bb",
         dtype=torch.float32,
         low_cpu_mem_usage=True,
         attn_implementation="sdpa",
@@ -84,8 +106,45 @@ async def test_transcription_service_transcribes_and_reuses_its_pipeline(
     )
     processor_loader.from_pretrained.assert_called_once_with(
         "openai/whisper-base",
+        revision="e37978b90ca9030d5170a5c07aadb050351a65bb",
         token="hf-provider-key",
     )
+
+
+def test_every_built_in_whisper_model_has_a_pinned_revision() -> None:
+    from free_claude_code.messaging.transcription import (
+        _MODEL_MAP,
+        _MODEL_REVISIONS,
+    )
+
+    assert set(_MODEL_REVISIONS) == set(_MODEL_MAP.values())
+    assert all(
+        len(sha) == 40 and all(c in "0123456789abcdef" for c in sha)
+        for sha in _MODEL_REVISIONS.values()
+    )
+
+
+@pytest.mark.asyncio
+async def test_custom_whisper_model_ids_are_not_pinned(tmp_path: Path) -> None:
+    audio_path = tmp_path / "voice.ogg"
+    audio_path.write_bytes(b"voice")
+    pipeline = MagicMock(return_value={"text": "hola"})
+    torch, transformers, model_loader, processor_loader = _fake_optional_modules(
+        pipeline
+    )
+    service = TranscriptionService(model="acme/whisper-es", device="cpu")
+
+    with (
+        patch.dict("sys.modules", {"torch": torch, "transformers": transformers}),
+        patch(
+            "free_claude_code.messaging.transcription._load_audio",
+            return_value={"array": [0.0], "sampling_rate": 16000},
+        ),
+    ):
+        assert await service.transcribe(audio_path) == "hola"
+
+    assert model_loader.from_pretrained.call_args.kwargs["revision"] is None
+    assert processor_loader.from_pretrained.call_args.kwargs["revision"] is None
 
 
 @pytest.mark.asyncio
@@ -185,7 +244,7 @@ async def test_cancelled_transcription_keeps_ownership_until_thread_exits(
     audio_path.write_bytes(b"voice")
     started = threading.Event()
     release = threading.Event()
-    pipeline = object()
+    pipeline = MagicMock()
 
     def blocking_transcribe(_path: Path) -> str:
         started.set()
@@ -206,7 +265,8 @@ async def test_cancelled_transcription_keeps_ownership_until_thread_exits(
 
             assert not transcribe_task.done()
             assert not close_task.done()
-            assert service._huggingface_api_key == "hf-secret"
+            key_during_transcription = service._huggingface_api_key
+            assert key_during_transcription == "hf-secret"
         finally:
             release.set()
 

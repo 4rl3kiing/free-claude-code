@@ -1,7 +1,8 @@
 # Branch protection: require these stable checks, not individual shard jobs:
 #   Ban suppressions and legacy annotations
-#   ruff-format, ruff-check, ty
+#   ruff-format, ruff-check, pyrefly
 #   Version policy
+#   Dependency audit
 #   pytest, playwright
 # GitHub may prefix with the workflow name (e.g. "CI / ruff-format"); use the names the branch protection UI offers after a run.
 
@@ -40,11 +41,58 @@ jobs:
 
       - name: "Fail on type ignores and legacy future annotations"
         run: |
-          if grep -rE '# type: ignore|# ty: ignore|from __future__ import annotations' --include='*.py' . --exclude-dir=.venv --exclude-dir=.git; then
-            echo "::error::type: ignore / ty: ignore comments and legacy future annotations are not allowed. Fix the underlying type/import issue instead."
+          if grep -rE '# type: ignore|# ty: ignore|#[[:space:]]*pyrefly:[[:space:]]*ignore|from __future__ import annotations' --include='*.py' --include='*.pyi' . --exclude-dir=.venv --exclude-dir=.git; then
+            echo "::error::Type-checker suppressions and legacy future annotations are not allowed. Fix the underlying type/import issue instead."
             exit 1
           fi
           exit 0
+
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Skip the test matrix when only docs or templates change
+        id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE_SHA" "${{ github.sha }}")
+          printf '%s\n' "$changed"
+          code=false
+          while IFS= read -r path; do
+            case "$path" in
+              ""|*.md|assets/*|.github/ISSUE_TEMPLATE/*|LICENSE) ;;
+              *) code=true ;;
+            esac
+          done <<< "$changed"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Fail on known vulnerabilities in locked dependencies
+        run: |
+          pipx install "uv>=0.13.7"
+          uv export --frozen --all-groups --all-extras --no-emit-project --no-hashes -o "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit -r "$RUNNER_TEMP/requirements.txt" --disable-pip --no-deps --progress-spinner off
 
   quality:
     name: ${{ matrix.id }}
@@ -60,8 +108,8 @@ jobs:
             run: uv run --locked ruff format --check
           - id: ruff-check
             run: uv run --locked ruff check
-          - id: ty
-            run: uv run --locked ty check
+          - id: pyrefly
+            run: uv run --locked pyrefly check
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -78,13 +126,17 @@ jobs:
 
   prepare-shards:
     name: Prepare test shards
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
+      actions: read
     outputs:
       pytest_matrix: ${{ steps.matrix.outputs.pytest_matrix }}
       playwright_matrix: ${{ steps.matrix.outputs.playwright_matrix }}
+      timings_input_id: ${{ steps.timings.outputs.artifact_id || steps.freeze.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -101,6 +153,24 @@ jobs:
             --playwright-windows-shards "$CI_PLAYWRIGHT_WINDOWS_SHARDS" \
             --playwright-macos-shards "$CI_PLAYWRIGHT_MACOS_SHARDS" >> "$GITHUB_OUTPUT"
 
+      - name: Prepare timing input
+        id: timings
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_PYTEST_MATRIX: ${{ steps.matrix.outputs.pytest_matrix }}
+          CI_PLAYWRIGHT_MATRIX: ${{ steps.matrix.outputs.playwright_matrix }}
+        run: python -m scripts.ci_timings prepare
+
+      - name: Freeze timing input
+        id: freeze
+        if: steps.timings.outputs.artifact_id == ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ci-timings-input-v1
+          path: ${{ runner.temp }}/fcc-ci-timings/baseline/
+          if-no-files-found: error
+          retention-days: 30
+
   pytest-shards:
     name: pytest (${{ matrix.os }}, shard ${{ matrix.shard }}/${{ matrix.shards }})
     needs: prepare-shards
@@ -108,6 +178,13 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      CI_PYTEST_MATRIX: ${{ needs.prepare-shards.outputs.pytest_matrix }}
+      CI_PLAYWRIGHT_MATRIX: ${{ needs.prepare-shards.outputs.playwright_matrix }}
+      CI_TIMINGS_INPUT_ID: ${{ needs.prepare-shards.outputs.timings_input_id }}
+      CI_TIMINGS_SUITE: pytest
+      CI_TIMINGS_SHARD: ${{ matrix.shard }}
+      CI_TIMINGS_SHARDS: ${{ matrix.shards }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare-shards.outputs.pytest_matrix) }}
@@ -123,11 +200,33 @@ jobs:
           runner-label: ${{ matrix.runner }}
           prepare-node: "true"
 
+      - name: Restore frozen timing input
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.prepare-shards.outputs.timings_input_id }}
+          path: ${{ runner.temp }}/fcc-ci-timings/baseline/
+
+      - name: Prepare shard timing file
+        run: uv run --locked python -m scripts.ci_timings start
+
       - name: Run pytest
         run: >-
-          uv run --locked pytest -v --tb=short -o thread_dump_timeout=15 --durations=50
+          uv run --locked pytest -c pyproject.toml -v --tb=short -o thread_dump_timeout=15 --durations=50
           --splits ${{ matrix.shards }} --group ${{ matrix.shard }}
           --splitting-algorithm=least_duration
+          --store-durations --clean-durations
+          --durations-path "${{ runner.temp }}/fcc-ci-timings/working/durations.json"
+
+      - name: Record shard timings
+        run: uv run --locked python -m scripts.ci_timings record
+
+      - name: Upload shard timings
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ci-timings-shard-v1-pytest-${{ matrix.os }}-${{ matrix.shard }}-of-${{ matrix.shards }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fcc-ci-timings/result/
+          if-no-files-found: error
+          retention-days: 30
 
   playwright-shards:
     name: playwright (${{ matrix.os }}, shard ${{ matrix.shard }}/${{ matrix.shards }})
@@ -136,6 +235,13 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      CI_PYTEST_MATRIX: ${{ needs.prepare-shards.outputs.pytest_matrix }}
+      CI_PLAYWRIGHT_MATRIX: ${{ needs.prepare-shards.outputs.playwright_matrix }}
+      CI_TIMINGS_INPUT_ID: ${{ needs.prepare-shards.outputs.timings_input_id }}
+      CI_TIMINGS_SUITE: playwright
+      CI_TIMINGS_SHARD: ${{ matrix.shard }}
+      CI_TIMINGS_SHARDS: ${{ matrix.shards }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare-shards.outputs.playwright_matrix) }}
@@ -153,14 +259,36 @@ jobs:
       - name: Install Chromium
         run: uv run --locked playwright install --only-shell ${{ matrix.os == 'Linux' && '--with-deps chromium' || 'chromium' }}
 
+      - name: Restore frozen timing input
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.prepare-shards.outputs.timings_input_id }}
+          path: ${{ runner.temp }}/fcc-ci-timings/baseline/
+
+      - name: Prepare shard timing file
+        run: uv run --locked python -m scripts.ci_timings start
+
       - name: Run Playwright
         run: >-
-          uv run --locked pytest e2e -v --tb=short
+          uv run --locked pytest e2e -c pyproject.toml -v --tb=short
           -o thread_dump_timeout=10 --durations=20
           --tracing=retain-on-failure --screenshot=only-on-failure
           --full-page-screenshot --output=test-results
           --splits ${{ matrix.shards }} --group ${{ matrix.shard }}
           --splitting-algorithm=least_duration
+          --store-durations --clean-durations
+          --durations-path "${{ runner.temp }}/fcc-ci-timings/working/durations.json"
+
+      - name: Record shard timings
+        run: uv run --locked python -m scripts.ci_timings record
+
+      - name: Upload shard timings
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ci-timings-shard-v1-playwright-${{ matrix.os }}-${{ matrix.shard }}-of-${{ matrix.shards }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fcc-ci-timings/result/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload Playwright failure artifacts
         if: failure()
@@ -173,7 +301,7 @@ jobs:
 
   pytest-summary:
     name: pytest
-    needs: [prepare-shards, pytest-shards]
+    needs: [changes, prepare-shards, pytest-shards]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -182,14 +310,63 @@ jobs:
     steps:
       - name: Require successful preparation and every shard
         env:
+          CODE_CHANGED: ${{ needs.changes.outputs.code }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
           PREPARATION_RESULT: ${{ needs.prepare-shards.result }}
           SHARDS_RESULT: ${{ needs.pytest-shards.result }}
         run: |
+          test "$CHANGES_RESULT" = success || exit 1
+          if [ "$CODE_CHANGED" != true ]; then
+            echo "Only docs or templates changed; the test matrix was skipped."
+            exit 0
+          fi
           test "$PREPARATION_RESULT" = success && test "$SHARDS_RESULT" = success
+
+  collect-test-timings:
+    name: Collect test timings
+    needs: [changes, prepare-shards, pytest-summary, playwright-summary]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      CI_PYTEST_MATRIX: ${{ needs.prepare-shards.outputs.pytest_matrix }}
+      CI_PLAYWRIGHT_MATRIX: ${{ needs.prepare-shards.outputs.playwright_matrix }}
+      CI_TIMINGS_INPUT_ID: ${{ needs.prepare-shards.outputs.timings_input_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Restore frozen timing input
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.prepare-shards.outputs.timings_input_id }}
+          path: ${{ runner.temp }}/fcc-ci-timings/baseline/
+
+      - name: Download current-attempt shard timings
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: ci-timings-shard-v1-*-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fcc-ci-timings/shards/
+
+      - name: Merge complete timing maps
+        id: merge
+        run: python -m scripts.ci_timings merge
+
+      - name: Publish complete timings
+        if: steps.merge.outputs.complete == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ci-timings-complete-v1-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fcc-ci-timings/complete/
+          if-no-files-found: error
+          retention-days: 30
 
   playwright-summary:
     name: playwright
-    needs: [prepare-shards, playwright-shards]
+    needs: [changes, prepare-shards, playwright-shards]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -198,7 +375,14 @@ jobs:
     steps:
       - name: Require successful preparation and every shard
         env:
+          CODE_CHANGED: ${{ needs.changes.outputs.code }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
           PREPARATION_RESULT: ${{ needs.prepare-shards.result }}
           SHARDS_RESULT: ${{ needs.playwright-shards.result }}
         run: |
+          test "$CHANGES_RESULT" = success || exit 1
+          if [ "$CODE_CHANGED" != true ]; then
+            echo "Only docs or templates changed; the test matrix was skipped."
+            exit 0
+          fi
           test "$PREPARATION_RESULT" = success && test "$SHARDS_RESULT" = success
