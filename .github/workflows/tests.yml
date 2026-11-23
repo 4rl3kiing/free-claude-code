@@ -2,6 +2,7 @@
 #   Ban suppressions and legacy annotations
 #   ruff-format, ruff-check, pyrefly
 #   Version policy
+#   Dependency audit
 #   pytest, playwright
 # GitHub may prefix with the workflow name (e.g. "CI / ruff-format"); use the names the branch protection UI offers after a run.
 
@@ -46,6 +47,53 @@ jobs:
           fi
           exit 0
 
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Skip the test matrix when only docs or templates change
+        id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE_SHA" "${{ github.sha }}")
+          printf '%s\n' "$changed"
+          code=false
+          while IFS= read -r path; do
+            case "$path" in
+              ""|*.md|assets/*|.github/ISSUE_TEMPLATE/*|LICENSE) ;;
+              *) code=true ;;
+            esac
+          done <<< "$changed"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Fail on known vulnerabilities in locked dependencies
+        run: |
+          pipx install "uv>=0.13.7"
+          uv export --frozen --all-groups --all-extras --no-emit-project --no-hashes -o "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit -r "$RUNNER_TEMP/requirements.txt" --disable-pip --no-deps --progress-spinner off
+
   quality:
     name: ${{ matrix.id }}
     runs-on: ubuntu-latest
@@ -78,6 +126,8 @@ jobs:
 
   prepare-shards:
     name: Prepare test shards
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -251,7 +301,7 @@ jobs:
 
   pytest-summary:
     name: pytest
-    needs: [prepare-shards, pytest-shards]
+    needs: [changes, prepare-shards, pytest-shards]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -260,14 +310,22 @@ jobs:
     steps:
       - name: Require successful preparation and every shard
         env:
+          CODE_CHANGED: ${{ needs.changes.outputs.code }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
           PREPARATION_RESULT: ${{ needs.prepare-shards.result }}
           SHARDS_RESULT: ${{ needs.pytest-shards.result }}
         run: |
+          test "$CHANGES_RESULT" = success || exit 1
+          if [ "$CODE_CHANGED" != true ]; then
+            echo "Only docs or templates changed; the test matrix was skipped."
+            exit 0
+          fi
           test "$PREPARATION_RESULT" = success && test "$SHARDS_RESULT" = success
 
   collect-test-timings:
     name: Collect test timings
-    needs: [prepare-shards, pytest-summary, playwright-summary]
+    needs: [changes, prepare-shards, pytest-summary, playwright-summary]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -308,7 +366,7 @@ jobs:
 
   playwright-summary:
     name: playwright
-    needs: [prepare-shards, playwright-shards]
+    needs: [changes, prepare-shards, playwright-shards]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -317,7 +375,14 @@ jobs:
     steps:
       - name: Require successful preparation and every shard
         env:
+          CODE_CHANGED: ${{ needs.changes.outputs.code }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
           PREPARATION_RESULT: ${{ needs.prepare-shards.result }}
           SHARDS_RESULT: ${{ needs.playwright-shards.result }}
         run: |
+          test "$CHANGES_RESULT" = success || exit 1
+          if [ "$CODE_CHANGED" != true ]; then
+            echo "Only docs or templates changed; the test matrix was skipped."
+            exit 0
+          fi
           test "$PREPARATION_RESULT" = success && test "$SHARDS_RESULT" = success

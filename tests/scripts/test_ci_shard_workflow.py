@@ -211,11 +211,12 @@ def test_timing_shards_share_the_frozen_input_and_upload_only_after_success(
 def test_timing_collector_publishes_only_complete_current_attempts() -> None:
     job = workflow()["jobs"]["collect-test-timings"]
     assert set(job["needs"]) == {
+        "changes",
         "prepare-shards",
         "pytest-summary",
         "playwright-summary",
     }
-    assert "if" not in job
+    assert job["if"] == "needs.changes.outputs.code == 'true'"
     assert job["permissions"] == {"contents": "read"}
     download = next(
         step
@@ -235,25 +236,29 @@ def test_timing_collector_publishes_only_complete_current_attempts() -> None:
 
 
 @pytest.mark.parametrize(
-    "suite,preparation,shards",
+    ("suite", "changes", "code", "preparation", "shards"),
     [
-        (suite, preparation, shards)
+        (suite, changes, code, preparation, shards)
         for suite in ("pytest", "playwright")
+        for changes in ("success", "failure")
+        for code in ("true", "false")
         for preparation in ("success", "failure", "cancelled", "skipped")
         for shards in ("success", "failure", "cancelled", "skipped")
     ],
 )
 def test_summary_only_passes_when_preparation_and_all_shards_succeed(
-    suite: str, preparation: str, shards: str
+    suite: str, changes: str, code: str, preparation: str, shards: str
 ) -> None:
     job = workflow()["jobs"][f"{suite}-summary"]
     assert job["name"] == suite
-    assert set(job["needs"]) == {"prepare-shards", f"{suite}-shards"}
+    assert set(job["needs"]) == {"changes", "prepare-shards", f"{suite}-shards"}
     assert job["if"] == "${{ always() }}"
     assert "continue-on-error" not in job
     assert len(job["steps"]) == 1
     step = job["steps"][0]
     expected_env = {
+        "CODE_CHANGED": "${{ needs.changes.outputs.code }}",
+        "CHANGES_RESULT": "${{ needs.changes.result }}",
         "PREPARATION_RESULT": "${{ needs.prepare-shards.result }}",
         "SHARDS_RESULT": "${{ needs." + suite + "-shards.result }}",
     }
@@ -273,6 +278,8 @@ def test_summary_only_passes_when_preparation_and_all_shards_succeed(
         [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
         env={
             **os.environ,
+            "CODE_CHANGED": code,
+            "CHANGES_RESULT": changes,
             "PREPARATION_RESULT": preparation,
             "SHARDS_RESULT": shards,
         },
@@ -281,6 +288,8 @@ def test_summary_only_passes_when_preparation_and_all_shards_succeed(
         check=False,
         timeout=30,
     )
-    assert (result.returncode == 0) == (preparation == shards == "success"), (
-        result.stderr
+    # Docs-only changes skip the matrix; code changes need every shard green.
+    expected = changes == "success" and (
+        code == "false" or preparation == shards == "success"
     )
+    assert (result.returncode == 0) == expected, result.stderr
