@@ -1,0 +1,22 @@
+name: Relock (temporary)
+on:
+  push:
+    branches: [ci/relock-extras]
+    paths: [.github/workflows/relock-tmp.yml]
+jobs:
+  relock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: |
+          pipx install "uv>=0.13.7"
+          uv lock
+          git diff --stat uv.lock
+          uv export --frozen --no-dev --no-emit-project --no-hashes | grep -c '==' || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "Relock for optional extras" && git push
