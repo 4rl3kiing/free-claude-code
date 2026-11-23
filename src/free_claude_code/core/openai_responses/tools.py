@@ -36,7 +36,9 @@ def flatten_responses_tool_name(name: str, *, namespace: str | None = None) -> s
     )
     if len(combined) <= _MAX_TOOL_NAME_LEN:
         return combined
-    digest = hashlib.sha1(combined.encode("utf-8")).hexdigest()[:8]
+    digest = hashlib.sha1(combined.encode("utf-8"), usedforsecurity=False).hexdigest()[
+        :8
+    ]
     prefix_len = _MAX_TOOL_NAME_LEN - len(digest) - 1
     return f"{combined[:prefix_len]}_{digest}"
 

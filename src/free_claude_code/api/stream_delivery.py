@@ -1,6 +1,5 @@
 """Own public projection, tool release, recovery mapping and wire termination."""
 
-import re
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
 from copy import deepcopy
 from typing import Literal
@@ -32,7 +31,7 @@ from free_claude_code.core.stream_delivery import (
 from free_claude_code.core.stream_output import StreamOutput, call_references
 
 from .classifier_projection import ClassifierProjection
-from .stream_frames import frame_data, replace_frame_data
+from .stream_frames import frame_data, frame_lines, replace_frame_data
 
 
 class DeliveryObservedStream(AsyncIterator[StreamOutput]):
@@ -337,8 +336,7 @@ class PublicResponseStream(AsyncIterator[str]):
             if self._wire_api == "chat" and frame.strip() == "data: [DONE]":
                 return self._release_content(frame, synthetic=synthetic)
             if any(
-                line.strip() and not line.startswith(":")
-                for line in re.split(r"\r\n|\r|\n", frame)
+                line.strip() and not line.startswith(":") for line in frame_lines(frame)
             ):
                 return self._release_content(frame, synthetic=synthetic)
             return frame
