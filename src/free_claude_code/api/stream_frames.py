@@ -7,13 +7,21 @@ import simplejson
 
 from free_claude_code.core.json_types import DecimalJsonObject, DecimalJsonValue
 
+_LINE_BREAK = re.compile(r"\r\n|\r|\n")
+_LINE_BREAK_KEPT = re.compile(r"(\r\n|\r|\n)")
+
+
+def frame_lines(frame: str) -> list[str]:
+    """Split an SSE frame on any line ending; the common LF-only frame skips regex."""
+    if "\r" not in frame:
+        return frame.split("\n")
+    return _LINE_BREAK.split(frame)
+
 
 def frame_data(frame: str) -> DecimalJsonObject | None:
     """Read only SSE data, retaining decimal precision for envelope edits."""
     text = "\n".join(
-        line[5:].lstrip(" ")
-        for line in re.split(r"\r\n|\r|\n", frame)
-        if line.startswith("data:")
+        line[5:].lstrip(" ") for line in frame_lines(frame) if line.startswith("data:")
     )
     try:
         value: DecimalJsonValue = simplejson.loads(text, use_decimal=True)
@@ -24,7 +32,7 @@ def frame_data(frame: str) -> DecimalJsonObject | None:
 
 def replace_frame_data(frame: str, payload: Mapping[str, object]) -> str:
     """Replace data lines while preserving other SSE fields and line endings."""
-    lines = re.split(r"(\r\n|\r|\n)", frame)
+    lines = _LINE_BREAK_KEPT.split(frame)
     replacement = "data: " + simplejson.dumps(
         payload, use_decimal=True, ensure_ascii=False
     )
