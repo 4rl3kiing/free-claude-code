@@ -2,8 +2,6 @@
 
 from collections.abc import Mapping
 
-import httpx
-
 from .provider_catalog import PROVIDER_CATALOG
 from .settings import Settings
 
@@ -29,11 +27,18 @@ PROVIDER_PROXY_ENV_KEYS = _provider_proxy_env_keys()
 def invalid_provider_proxy_keys(values: Mapping[str, str]) -> tuple[str, ...]:
     """Return catalog provider-proxy keys whose nonblank values are unusable."""
 
+    candidates = [
+        (key, value)
+        for key in PROVIDER_PROXY_ENV_KEYS
+        if (value := values.get(key, "").strip())
+    ]
+    if not candidates:
+        return ()
+    # Deferred: launchers load this module on every start and rarely set proxies.
+    import httpx
+
     invalid: list[str] = []
-    for key in PROVIDER_PROXY_ENV_KEYS:
-        value = values.get(key, "").strip()
-        if not value:
-            continue
+    for key, value in candidates:
         try:
             proxy = httpx.Proxy(value)
         except httpx.InvalidURL, ValueError:
