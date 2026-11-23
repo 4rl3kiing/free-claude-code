@@ -1,0 +1,93 @@
+name: Sync upstream
+
+# Weekly: if Alishahryar1/free-claude-code has new commits, open a PR that
+# brings them into this fork's main. It never merges; the owner approves.
+
+on:
+  schedule:
+    - cron: "41 18 * * 1" # Mondays 12:41 America/Mexico_City
+  workflow_dispatch:
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Open upstream sync PR
+    if: github.repository == '4rl3kiing/free-claude-code'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM: https://github.com/Alishahryar1/free-claude-code.git
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Check for new upstream commits
+        id: check
+        run: |
+          git remote add upstream "$UPSTREAM"
+          git fetch --no-tags upstream main
+          behind=$(git rev-list --count HEAD..upstream/main)
+          open=$(gh pr list --state open --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("sync/upstream-"))] | length')
+          echo "behind=$behind open=$open"
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          if [ "$behind" -gt 0 ] && [ "$open" -eq 0 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build sync branch
+        if: steps.check.outputs.run == 'true'
+        id: branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          branch="sync/upstream-$(date -u +%Y-%m-%d)"
+          git switch -c "$branch"
+          if git merge-base --is-ancestor HEAD upstream/main; then
+            git merge --ff-only upstream/main
+          else
+            # The fork has its own commits: merge, never rebase.
+            git merge --no-edit upstream/main
+          fi
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Run checks
+        if: steps.check.outputs.run == 'true'
+        run: |
+          pipx install "uv>=0.13.7"
+          uv sync --locked
+          sh scripts/ci.sh --skip playwright --skip macos-desktop
+          git diff --exit-code
+
+      - name: Open pull request
+        if: steps.check.outputs.run == 'true'
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          BEHIND: ${{ steps.check.outputs.behind }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          git push -u origin "$BRANCH"
+          {
+            echo "Trae a \`main\` los $BEHIND commits nuevos de \`Alishahryar1/free-claude-code\`."
+            echo
+            echo "## Commits"
+            git log --format='- %s' main..HEAD | head -60
+            echo
+            echo "## Verificación"
+            echo "ruff, pyrefly y pytest pasaron en este workflow: $RUN_URL"
+            echo "Los PRs abiertos por GitHub Actions no lanzan el CI normal; para correrlo, cierra y reabre el PR."
+            echo
+            echo "Fusionar con **Rebase and merge** (o merge commit), no Squash."
+          } > "$RUNNER_TEMP/body.md"
+          gh pr create --base main --head "$BRANCH" \
+            --title "patch: Sincronizar con el repositorio original ($BEHIND commits)" \
+            --body-file "$RUNNER_TEMP/body.md"
