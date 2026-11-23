@@ -1,0 +1,36 @@
+name: Relock dependencies (temporary)
+
+on:
+  push:
+    branches: [ci/relock-deps]
+    paths: [.github/workflows/relock-tmp.yml]
+
+jobs:
+  relock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Upgrade vulnerable transitive dependencies
+        run: |
+          pipx install "uv>=0.13.7"
+          uv lock \
+            --upgrade-package starlette --upgrade-package python-multipart \
+            --upgrade-package urllib3 --upgrade-package pyasn1 \
+            --upgrade-package dnspython --upgrade-package setuptools \
+            --upgrade-package cryptography --upgrade-package certifi \
+            --upgrade-package multidict --upgrade-package pygments
+          git diff --stat uv.lock
+      - name: Audit the new lock
+        run: |
+          uv export --frozen --all-groups --no-emit-project --no-hashes -o /tmp/req.txt
+          uvx pip-audit -r /tmp/req.txt --disable-pip --no-deps --progress-spinner off || true
+      - name: Commit lock
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "patch: Upgrade vulnerable transitive dependencies" || exit 0
+          git push
