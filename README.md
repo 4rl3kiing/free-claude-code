@@ -512,7 +512,7 @@ in **Admin UI → Messaging**, then click **Apply**.
 <details>
 <summary><strong>Voice notes</strong></summary>
 
-NVIDIA NIM transcription support is included in every installation. In **Admin UI → Messaging → Voice**, enable voice notes, select `nvidia_nim`, and choose a supported model. Configure your **NVIDIA NIM API key** on the Providers page.
+NVIDIA NIM transcription needs the optional `voice_nim` extra, and Discord and Telegram need the `messaging` extra (for example `free-claude-code[messaging,voice_nim]`). FCC names the missing extra if one is not installed. In **Admin UI → Messaging → Voice**, enable voice notes, select `nvidia_nim`, and choose a supported model. Configure your **NVIDIA NIM API key** on the Providers page.
 
 For local Whisper on CPU or CUDA, re-run the installer with the local voice option:
 
