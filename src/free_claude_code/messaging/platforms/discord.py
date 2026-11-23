@@ -40,7 +40,8 @@ def _get_discord() -> DiscordLibrary:
     """Return the discord module or raise a setup error."""
     if not DISCORD_AVAILABLE or _discord_module is None:
         raise ImportError(
-            "discord.py is required. Install with: pip install discord.py"
+            "discord.py is required. Reinstall with free-claude-code[messaging].",
+            name="discord",
         )
     return _discord_module
 
@@ -85,7 +86,8 @@ class DiscordRuntime:
     ) -> None:
         if not DISCORD_AVAILABLE:
             raise ImportError(
-                "discord.py is required. Install with: pip install discord.py"
+                "discord.py is required. Reinstall with free-claude-code[messaging].",
+                name="discord",
             )
 
         self.bot_token = bot_token
