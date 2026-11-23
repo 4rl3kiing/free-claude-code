@@ -21,11 +21,12 @@ jobs:
             --upgrade-package urllib3 --upgrade-package pyasn1 \
             --upgrade-package dnspython --upgrade-package setuptools \
             --upgrade-package cryptography --upgrade-package certifi \
-            --upgrade-package multidict --upgrade-package pygments
+            --upgrade-package multidict --upgrade-package pygments \
+            --upgrade-package filelock --upgrade-package fsspec --upgrade-package msgpack
           git diff --stat uv.lock
       - name: Audit the new lock
         run: |
-          uv export --frozen --all-groups --no-emit-project --no-hashes -o /tmp/req.txt
+          uv export --frozen --all-groups --all-extras --no-emit-project --no-hashes -o /tmp/req.txt
           uvx pip-audit -r /tmp/req.txt --disable-pip --no-deps --progress-spinner off || true
       - name: Commit lock
         run: |
