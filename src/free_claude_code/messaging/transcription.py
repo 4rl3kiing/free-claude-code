@@ -15,6 +15,17 @@ _MODEL_MAP: dict[str, str] = {
     "large-v3": "openai/whisper-large-v3",
     "large-v3-turbo": "openai/whisper-large-v3-turbo",
 }
+# Pinned Hugging Face commits for the built-in names: a moved "main" branch can
+# never swap the weights or code we download. Custom model ids stay unpinned.
+_MODEL_REVISIONS: dict[str, str] = {
+    "openai/whisper-tiny": "169d4a4341b33bc18d8881c4b69c2e104e1cc0af",
+    "openai/whisper-base": "e37978b90ca9030d5170a5c07aadb050351a65bb",
+    "openai/whisper-small": "973afd24965f72e36ca33b3055d56a652f456b4d",
+    "openai/whisper-medium": "abdf7c39ab9d0397620ccaea8974cc764cd0953e",
+    "openai/whisper-large-v2": "ae4642769ce2ad8fc292556ccea8e901f1530655",
+    "openai/whisper-large-v3": "06f233fe06e710322aca913c1bc4249a0d71fce1",
+    "openai/whisper-large-v3-turbo": "41f01f3fe87f28c78e2fbf8b568835947dd65ed9",
+}
 _WHISPER_SAMPLE_RATE = 16000
 
 
@@ -102,15 +113,19 @@ class TranscriptionService:
         use_cuda = self._device == "cuda" and torch.cuda.is_available()
         pipeline_device = "cuda:0" if use_cuda else "cpu"
         model_dtype = torch.float16 if use_cuda else torch.float32
+        revision = _MODEL_REVISIONS.get(self._model_id)
         model = AutoModelForSpeechSeq2Seq.from_pretrained(
             self._model_id,
+            revision=revision,
             dtype=model_dtype,
             low_cpu_mem_usage=True,
             attn_implementation="sdpa",
             token=token,
         )
         model = model.to(pipeline_device)
-        processor = AutoProcessor.from_pretrained(self._model_id, token=token)
+        processor = AutoProcessor.from_pretrained(
+            self._model_id, revision=revision, token=token
+        )
         self._pipeline = pipeline(
             "automatic-speech-recognition",
             model=model,

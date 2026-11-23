@@ -98,6 +98,7 @@ async def test_transcription_service_transcribes_and_reuses_its_pipeline(
     assert pipeline.call_count == 2
     model_loader.from_pretrained.assert_called_once_with(
         "openai/whisper-base",
+        revision="e37978b90ca9030d5170a5c07aadb050351a65bb",
         dtype=torch.float32,
         low_cpu_mem_usage=True,
         attn_implementation="sdpa",
@@ -105,6 +106,7 @@ async def test_transcription_service_transcribes_and_reuses_its_pipeline(
     )
     processor_loader.from_pretrained.assert_called_once_with(
         "openai/whisper-base",
+        revision="e37978b90ca9030d5170a5c07aadb050351a65bb",
         token="hf-provider-key",
     )
 
@@ -282,3 +284,39 @@ async def test_transcription_service_reports_missing_local_extra(
         pytest.raises(ImportError, match="voice_local extra"),
     ):
         await service.transcribe(audio_path)
+
+
+def test_every_built_in_whisper_model_has_a_pinned_revision() -> None:
+    from free_claude_code.messaging.transcription import (
+        _MODEL_MAP,
+        _MODEL_REVISIONS,
+    )
+
+    assert set(_MODEL_REVISIONS) == set(_MODEL_MAP.values())
+    assert all(
+        len(sha) == 40 and all(c in "0123456789abcdef" for c in sha)
+        for sha in _MODEL_REVISIONS.values()
+    )
+
+
+@pytest.mark.asyncio
+async def test_custom_whisper_model_ids_are_not_pinned(tmp_path: Path) -> None:
+    audio_path = tmp_path / "voice.ogg"
+    audio_path.write_bytes(b"voice")
+    pipeline = MagicMock(return_value={"text": "hola"})
+    torch, transformers, model_loader, processor_loader = _fake_optional_modules(
+        pipeline
+    )
+    service = TranscriptionService(model="acme/whisper-es", device="cpu")
+
+    with (
+        patch.dict("sys.modules", {"torch": torch, "transformers": transformers}),
+        patch(
+            "free_claude_code.messaging.transcription._load_audio",
+            return_value={"array": [0.0], "sampling_rate": 16000},
+        ),
+    ):
+        assert await service.transcribe(audio_path) == "hola"
+
+    assert model_loader.from_pretrained.call_args.kwargs["revision"] is None
+    assert processor_loader.from_pretrained.call_args.kwargs["revision"] is None
