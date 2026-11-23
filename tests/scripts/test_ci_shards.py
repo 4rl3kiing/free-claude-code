@@ -49,7 +49,23 @@ def test_matrix_outputs_cover_each_os_and_shard(counts: tuple[int, ...]) -> None
         name: load_json_value(value)
         for name, value in (line.split("=", 1) for line in result.stdout.splitlines())
     }
-    assert set(outputs) == {"pytest_matrix", "playwright_matrix"}
+    assert set(outputs) == {
+        f"{suite}_{name}"
+        for suite in ("pytest", "playwright")
+        for name in ("matrix", "linux_matrix", "other_matrix")
+    }
+    for suite in ("pytest", "playwright"):
+        full = array_payload(object_payload(outputs[f"{suite}_matrix"])["include"])
+        linux = array_payload(
+            object_payload(outputs[f"{suite}_linux_matrix"])["include"]
+        )
+        other = array_payload(
+            object_payload(outputs[f"{suite}_other_matrix"])["include"]
+        )
+        # The gate and the rest partition the full matrix exactly.
+        assert {object_payload(row)["os"] for row in linux} == {"Linux"}
+        assert "Linux" not in {object_payload(row)["os"] for row in other}
+        assert sorted(map(str, linux + other)) == sorted(map(str, full))
     for name, suite_counts in zip(
         ("pytest_matrix", "playwright_matrix"), (counts[:3], counts[3:]), strict=True
     ):

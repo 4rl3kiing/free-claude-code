@@ -29,11 +29,22 @@ def test_shard_jobs_use_generated_matrices_and_existing_parallelism(suite: str) 
         variable = f"CI_{suite.upper()}_{os_name.upper()}_SHARDS"
         shard_count(config["env"][variable])
         assert f'--{suite}-{os_name}-shards "${variable}"' in generate["run"]
-    job = config["jobs"][f"{suite}-shards"]
-    assert job["needs"] == "prepare-shards"
-    assert job["strategy"]["matrix"] == (
-        "${{ fromJSON(needs.prepare-shards.outputs." + suite + "_matrix) }}"
+    linux = config["jobs"][f"{suite}-shards"]
+    other = config["jobs"][f"{suite}-shards-other"]
+    assert linux["needs"] == "prepare-shards"
+    # Windows and macOS start only after every Linux shard passed.
+    assert other["needs"] == ["prepare-shards", f"{suite}-shards"]
+    assert linux["strategy"]["matrix"] == (
+        "${{ fromJSON(needs.prepare-shards.outputs." + suite + "_linux_matrix) }}"
     )
+    assert other["strategy"]["matrix"] == (
+        "${{ fromJSON(needs.prepare-shards.outputs." + suite + "_other_matrix) }}"
+    )
+    assert linux["steps"] == other["steps"]
+    assert linux["env"] == other["env"]
+    for name in ("matrix", "linux_matrix", "other_matrix"):
+        assert f"{suite}_{name}" in prepare["outputs"]
+    job = linux
     assert job["strategy"]["fail-fast"] is False
     assert "max-parallel" not in job["strategy"]
     assert "continue-on-error" not in job
@@ -239,22 +250,28 @@ def test_timing_collector_publishes_only_complete_current_attempts() -> None:
 
 
 @pytest.mark.parametrize(
-    ("suite", "changes", "code", "preparation", "shards"),
+    ("suite", "changes", "code", "preparation", "shards", "other"),
     [
-        (suite, changes, code, preparation, shards)
+        (suite, changes, code, preparation, shards, other)
         for suite in ("pytest", "playwright")
         for changes in ("success", "failure")
         for code in ("true", "false")
-        for preparation in ("success", "failure", "cancelled", "skipped")
+        for preparation in ("success", "failure", "skipped")
         for shards in ("success", "failure", "cancelled", "skipped")
+        for other in ("success", "failure", "skipped")
     ],
 )
 def test_summary_only_passes_when_preparation_and_all_shards_succeed(
-    suite: str, changes: str, code: str, preparation: str, shards: str
+    suite: str, changes: str, code: str, preparation: str, shards: str, other: str
 ) -> None:
     job = workflow()["jobs"][f"{suite}-summary"]
     assert job["name"] == suite
-    assert set(job["needs"]) == {"changes", "prepare-shards", f"{suite}-shards"}
+    assert set(job["needs"]) == {
+        "changes",
+        "prepare-shards",
+        f"{suite}-shards",
+        f"{suite}-shards-other",
+    }
     assert job["if"] == "${{ always() }}"
     assert "continue-on-error" not in job
     assert len(job["steps"]) == 1
@@ -264,6 +281,7 @@ def test_summary_only_passes_when_preparation_and_all_shards_succeed(
         "CHANGES_RESULT": "${{ needs.changes.result }}",
         "PREPARATION_RESULT": "${{ needs.prepare-shards.result }}",
         "SHARDS_RESULT": "${{ needs." + suite + "-shards.result }}",
+        "OTHER_SHARDS_RESULT": "${{ needs." + suite + "-shards-other.result }}",
     }
     assert step["env"] == expected_env
     bash = shutil.which("bash")
@@ -285,6 +303,7 @@ def test_summary_only_passes_when_preparation_and_all_shards_succeed(
             "CHANGES_RESULT": changes,
             "PREPARATION_RESULT": preparation,
             "SHARDS_RESULT": shards,
+            "OTHER_SHARDS_RESULT": other,
         },
         capture_output=True,
         text=True,
@@ -293,6 +312,6 @@ def test_summary_only_passes_when_preparation_and_all_shards_succeed(
     )
     # Docs-only changes skip the matrix; code changes need every shard green.
     expected = changes == "success" and (
-        code == "false" or preparation == shards == "success"
+        code == "false" or preparation == shards == other == "success"
     )
     assert (result.returncode == 0) == expected, result.stderr
