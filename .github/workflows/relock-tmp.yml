@@ -35,3 +35,8 @@ jobs:
           git add uv.lock
           git commit -m "patch: Upgrade vulnerable transitive dependencies" || exit 0
           git push
+      - name: Print Whisper revisions
+        run: |
+          for m in tiny base small medium large-v2 large-v3 large-v3-turbo; do
+            echo "WHISPER $m $(curl -fsS "https://huggingface.co/api/models/openai/whisper-$m/revision/main" | jq -r .sha)"
+          done
