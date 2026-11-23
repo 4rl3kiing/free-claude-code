@@ -44,8 +44,11 @@ def test_shard_jobs_use_generated_matrices_and_existing_parallelism(suite: str) 
         for step in job["steps"]
         if step.get("run", "").startswith("uv run --locked pytest ")
     )
-    assert "--splits ${{ matrix.shards }}" in command
-    assert "--group ${{ matrix.shard }}" in command
+    # Matrix values reach the shell through env, never template expansion.
+    assert '--splits "$CI_TIMINGS_SHARDS"' in command
+    assert '--group "$CI_TIMINGS_SHARD"' in command
+    assert job["env"]["CI_TIMINGS_SHARDS"] == "${{ matrix.shards }}"
+    assert job["env"]["CI_TIMINGS_SHARD"] == "${{ matrix.shard }}"
     assert "--splitting-algorithm=least_duration" in command
     assert "-n " not in command
     assert "--dist=" not in command
@@ -97,8 +100,8 @@ def test_external_timing_path_preserves_config_and_collection_scope(
     )
     command = (
         command.replace("${{ runner.temp }}", runner_temp.as_posix())
-        .replace("${{ matrix.shards }}", "1")
-        .replace("${{ matrix.shard }}", "1")
+        .replace('"$CI_TIMINGS_SHARDS"', "1")
+        .replace('"$CI_TIMINGS_SHARD"', "1")
     )
     result = subprocess.run(
         [sys.executable, "-m", *shlex.split(command)[3:], "--collect-only"],
