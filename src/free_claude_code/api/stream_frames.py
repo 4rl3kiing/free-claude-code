@@ -2,11 +2,16 @@
 
 import re
 from collections.abc import Mapping
+from decimal import Decimal
 
 import simplejson
 
 from free_claude_code.core.json_types import DecimalJsonObject, DecimalJsonValue
 
+# Built once: simplejson.loads/dumps with non-default options build a new
+# decoder or encoder on every call, which this per-event path cannot afford.
+_DECODER = simplejson.JSONDecoder(parse_float=Decimal)
+_ENCODER = simplejson.JSONEncoder(ensure_ascii=False, allow_nan=False, use_decimal=True)
 _LINE_BREAK = re.compile(r"\r\n|\r|\n")
 _LINE_BREAK_KEPT = re.compile(r"(\r\n|\r|\n)")
 
@@ -24,7 +29,7 @@ def frame_data(frame: str) -> DecimalJsonObject | None:
         line[5:].lstrip(" ") for line in frame_lines(frame) if line.startswith("data:")
     )
     try:
-        value: DecimalJsonValue = simplejson.loads(text, use_decimal=True)
+        value: DecimalJsonValue = _DECODER.decode(text)
     except ValueError:
         return None
     return value if isinstance(value, dict) else None
@@ -33,9 +38,7 @@ def frame_data(frame: str) -> DecimalJsonObject | None:
 def replace_frame_data(frame: str, payload: Mapping[str, object]) -> str:
     """Replace data lines while preserving other SSE fields and line endings."""
     lines = _LINE_BREAK_KEPT.split(frame)
-    replacement = "data: " + simplejson.dumps(
-        payload, use_decimal=True, ensure_ascii=False
-    )
+    replacement = "data: " + _ENCODER.encode(payload)
     parts: list[str] = []
     replaced = False
     for index in range(0, len(lines), 2):
