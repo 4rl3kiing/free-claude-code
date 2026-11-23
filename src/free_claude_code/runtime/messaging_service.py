@@ -36,6 +36,21 @@ if TYPE_CHECKING:
     from .messaging_sqlite import SQLiteMessagingStore
 
 
+# Telegram and Discord ship in the optional "messaging" extra.
+_MESSAGING_EXTRA_MODULES = frozenset({"telegram", "discord"})
+MISSING_MESSAGING_EXTRA = (
+    "Messaging needs the optional messaging extra. Reinstall with "
+    "free-claude-code[messaging] and restart FCC."
+)
+
+
+def messaging_import_error(exc: ImportError) -> str:
+    """Say which extra to install when a messaging library is missing."""
+    if (exc.name or "").split(".")[0] in _MESSAGING_EXTRA_MODULES:
+        return MISSING_MESSAGING_EXTRA
+    return "Messaging could not start. Check its configuration and restart FCC."
+
+
 class MessagingService:
     """Own one messaging graph, borrowing the database and HTTP readiness signal."""
 
@@ -151,9 +166,7 @@ class MessagingService:
                 self._messaging_state = "disabled"
         except ImportError as exc:
             self._messaging_state = "failed"
-            self._messaging_error = (
-                "Messaging could not start. Check its configuration and restart FCC."
-            )
+            self._messaging_error = messaging_import_error(exc)
             cleaned = await self.close_delivery()
             if self.settings.log_api_error_tracebacks:
                 logger.warning("Messaging module import error: {}", exc)
